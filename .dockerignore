@@ -1,0 +1,17 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+*.pem
+.vscode
+.claude
+.gemini
+tests
+.pytest_cache
+.coverage
+htmlcov
+dist
+build
+*.egg-info

@@ -1,0 +1,19 @@
+services:
+  trader:
+    build:
+      context: .
+    container_name: trader-bot
+    volumes:
+      # Mount the .env file for configuration
+      - ./.env:/app/.env:ro
+      # Mount the Kalshi private key
+      - ./kalshi_private_key.pem:/app/kalshi_private_key.pem:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    restart: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
