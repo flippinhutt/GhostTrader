@@ -68,3 +68,5 @@ Trade coordination and risk management.
 - `TRADE_LIMIT_USD`: Cap on USD investment per trade.
 - `MIN_PROFIT_USD`: Minimum profit per share required.
 - `SLIPPAGE_TOLERANCE`: Max slippage for orders (0.01 = 1%).
+- `MARKET_SCAN_LIMIT`: Maximum number of markets to scan per iteration (~100-250 suggested).
+- `POLL_INTERVAL_SECONDS`: Idle wait time between scan loops (~2-4s suggested).

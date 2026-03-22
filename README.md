@@ -48,6 +48,8 @@ cp .env.example .env
 | `TRADE_LIMIT_USD` | Maximum USD amount to invest per trade. | `10.0` |
 | `MIN_PROFIT_USD` | Minimum profit per share required to signal a trade. | `0.01` |
 | `SLIPPAGE_TOLERANCE`| Max price movement allowed for execution. | `0.01` |
+| `MARKET_SCAN_LIMIT`| Number of markets to scan per loop. | `100` |
+| `POLL_INTERVAL_SECONDS`| Seconds to wait between scans. | `3` |
 | `KALSHI_ENVIRONMENT`| `demo` for testing, `prod` for real funds. | `demo` |
 
 ## 🏃 Getting Started

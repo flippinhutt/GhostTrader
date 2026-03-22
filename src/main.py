@@ -12,19 +12,28 @@ from src.engine import Engine
 load_dotenv(override=True)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
+
 async def main():
-    logger.info("Initializing Trader Bot (MULTI-MARKET FRAMEWORK)...")
+    """Main execution loop for the Trader Bot.
     
+    Initializes the appropriate client (Kalshi/Polymarket), fetches initial balance,
+    and enters a continuous scan-and-execute loop. Polling frequency is controlled 
+    via `POLL_INTERVAL_SECONDS`.
+    """
+    logger.info("Initializing Trader Bot (MULTI-MARKET FRAMEWORK)...")
+
     # Preference: Choose Kalshi for US-regulated trading if credentials exist
     if os.getenv("KALSHI_API_KEY_ID"):
         logger.info("Using Kalshi Client (v2 API Key)...")
         client = KalshiClient(
             key_id=os.getenv("KALSHI_API_KEY_ID"),
             private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH"),
-            environment=os.getenv("KALSHI_ENVIRONMENT", "demo")
+            environment=os.getenv("KALSHI_ENVIRONMENT", "demo"),
         )
     else:
         logger.info("Using Polymarket Client...")
@@ -32,11 +41,11 @@ async def main():
             private_key=os.getenv("POLYGON_PRIVATE_KEY"),
             api_key=os.getenv("CLOB_API_KEY"),
             secret=os.getenv("CLOB_SECRET"),
-            passphrase=os.getenv("CLOB_PASSPHRASE")
+            passphrase=os.getenv("CLOB_PASSPHRASE"),
         )
-    
+
     scanner = Scanner(client)
-    
+
     # Fetch actual balance for the engine
     logger.info("Fetching account balance...")
     try:
@@ -50,24 +59,28 @@ async def main():
     except Exception as e:
         logger.warning(f"Could not fetch live balance ({e}). Using default.")
         actual_balance = 1400.0
-        
+
     engine = Engine(client, balance=actual_balance)
-    
+
     try:
         if os.getenv("LIVE_MODE") == "true":
             logger.warning("!!! BOT IS RUNNING IN LIVE MODE !!!")
-        
+
         while True:
             logger.info("Scanning for inefficiencies...")
             inefficiencies = await scanner.scan_for_inefficiencies()
-            
+
             for item in inefficiencies:
                 await engine.execute_trade(item)
-            
-            logger.info(f"Status: {engine.trades_executed} trades | Balance: ${engine.balance:.2f}")
-            await asyncio.sleep(10)
+
+            logger.info(
+                f"Status: {engine.trades_executed} trades | Balance: ${engine.balance:.2f}"
+            )
+            poll_interval = int(os.getenv("POLL_INTERVAL_SECONDS", "3"))
+            await asyncio.sleep(poll_interval)
     finally:
         client.close()
+
 
 if __name__ == "__main__":
     try:

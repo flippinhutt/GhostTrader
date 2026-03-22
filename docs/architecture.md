@@ -48,3 +48,4 @@ sequenceDiagram
 - **Credential Storage**: Uses `.env` and volume-mounted `.pem` files in Docker.
 - **Containerization**: Runs in a minimal `python-slim` Docker environment to ensure stability.
 - **Non-blocking I/O**: Built on `asyncio` for high-performance scanning.
+- **Configurable Pacing**: Scan frequency and market depth are adjustable via `.env` (Polling rate & Scan limit).
