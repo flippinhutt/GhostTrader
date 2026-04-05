@@ -41,7 +41,8 @@ Logic for monitoring markets and detecting opportunities.
 | Method | Parameters | Returns | Description |
 | :--- | :--- | :--- | :--- |
 | `scan_for_inefficiencies` | None | `list[dict]` | Scans top markets for arbitrage signals. |
-| `_analyze_market` | `market: dict`, `tokens: list[str]` | `dict` or `None` | Analyzes Unity constraint for a specific market. |
+| `_analyze_poly_market` | `market: dict`, `tokens: list[str]` | `dict` or `None` | Analyzes Unity constraint for a Polymarket. |
+| `_analyze_kalshi_market` | `market: obj` | `dict` or `None` | Analyzes price parity for a Kalshi market. |
 
 ---
 

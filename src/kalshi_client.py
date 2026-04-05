@@ -52,7 +52,16 @@ class KalshiClient:
             return 0.0
 
     def get_markets(self, limit: int = 100, status: str = "open"):
-        """Fetch markets from Kalshi."""
+        """Fetch active markets from the Kalshi API.
+
+        Args:
+            limit (int, optional): Maximum number of markets to return. Defaults to 100.
+            status (str, optional): The status of markets to filter by (e.g., 'open', 'closed'). 
+                Defaults to "open".
+
+        Returns:
+            list: A list of Kalshi market objects.
+        """
         try:
             response = self.markets_api.get_markets(limit=limit, status=status)
             return response.markets
@@ -61,7 +70,14 @@ class KalshiClient:
             return []
 
     def get_order_book(self, ticker: str):
-        """Fetch order book for a specific Kalshi ticker."""
+        """Fetch the current order book for a specific Kalshi ticker.
+
+        Args:
+            ticker (str): The unique identifier (ticker) for the market (e.g., 'AAPL-23-A').
+
+        Returns:
+            Optional[Orderbook]: The Kalshi order book object, or None if an error occurs.
+        """
         try:
             response = self.markets_api.get_market_orderbook(ticker)
             return response.orderbook
@@ -70,7 +86,21 @@ class KalshiClient:
             return None
 
     def post_order(self, ticker: str, side: str, action: str, count: int, price: int):
-        """Place an order on Kalshi."""
+        """Place a limit order on the specified Kalshi market.
+
+        Args:
+            ticker (str): The Kalshi market ticker.
+            side (str): The side of the trade ('yes' or 'no').
+            action (str): The action to take ('buy' or 'sell').
+            count (int): The number of contracts to trade.
+            price (int): The limit price in cents (1-99).
+
+        Returns:
+            CreateOrderResponse: The response from the Kalshi API.
+
+        Raises:
+            Exception: If the order placement fails.
+        """
         try:
             body = create_order_request.CreateOrderRequest(
                 ticker=ticker,

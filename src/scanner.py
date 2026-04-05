@@ -58,8 +58,17 @@ class Scanner:
 
         return inefficiencies
 
-    async def _analyze_poly_market(self, market: Dict, tokens: List[str]) -> Dict:
-        """Analyzes a Polymarket for Unity constraint violations."""
+    async def _analyze_poly_market(self, market: Dict, tokens: List[str]) -> Union[Dict, None]:
+        """Analyze a Polymarket for pricing inefficiencies (Total Price < $1.00).
+
+        Args:
+            market (dict): The market metadata from the Polymarket API.
+            tokens (list): List of token IDs (YES/NO) for the market.
+
+        Returns:
+            Optional[dict]: Inefficiency data if an arbitrage opportunity is found, 
+                else None.
+        """
         tasks = [self.client.get_order_book(tid) for tid in tokens]
         books = await asyncio.gather(*tasks)
 
@@ -94,11 +103,15 @@ class Scanner:
 
         return None
 
-    async def _analyze_kalshi_market(self, market) -> Dict:
-        """Analyzes a Kalshi market for arbitrage.
+    async def _analyze_kalshi_market(self, market) -> Union[Dict, None]:
+        """Analyze a Kalshi market for pricing inefficiencies (Total Price < $1.00).
 
-        Kalshi usually enforces YES + NO = 100 on the same contract, but cross-market
-        or momentary inconsistencies can still exist.
+        Args:
+            market: The Kalshi market object.
+
+        Returns:
+            Optional[dict]: Inefficiency data if an arbitrage opportunity is found, 
+                else None.
         """
         ticker = market.ticker
         book = self.client.get_order_book(ticker)
