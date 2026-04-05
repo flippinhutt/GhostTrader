@@ -3,7 +3,6 @@ import logging
 import os
 import inspect
 from dotenv import load_dotenv
-from src.client import PolymarketClient
 from src.kalshi_client import KalshiClient
 from src.scanner import Scanner
 from src.engine import Engine
@@ -21,28 +20,22 @@ logger = logging.getLogger(__name__)
 async def main():
     """Main execution loop for the Trader Bot.
     
-    Initializes the appropriate client (Kalshi/Polymarket), fetches initial balance,
-    and enters a continuous scan-and-execute loop. Polling frequency is controlled 
-    via `POLL_INTERVAL_SECONDS`.
+    Initializes the Kalshi client, fetches initial balance,
+    and enters a continuous scan-and-execute loop.
     """
-    logger.info("Initializing Trader Bot (MULTI-MARKET FRAMEWORK)...")
+    logger.info("Initializing Trader Bot (KALSHI ONLY)...")
 
-    # Preference: Choose Kalshi for US-regulated trading if credentials exist
-    if os.getenv("KALSHI_API_KEY_ID"):
-        logger.info("Using Kalshi Client (v2 API Key)...")
-        client = KalshiClient(
-            key_id=os.getenv("KALSHI_API_KEY_ID"),
-            private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH"),
-            environment=os.getenv("KALSHI_ENVIRONMENT", "demo"),
-        )
-    else:
-        logger.info("Using Polymarket Client...")
-        client = PolymarketClient(
-            private_key=os.getenv("POLYGON_PRIVATE_KEY"),
-            api_key=os.getenv("CLOB_API_KEY"),
-            secret=os.getenv("CLOB_SECRET"),
-            passphrase=os.getenv("CLOB_PASSPHRASE"),
-        )
+    # Initialize Kalshi for US-regulated trading
+    key_id = os.getenv("KALSHI_API_KEY_ID")
+    if not key_id:
+        logger.error("KALSHI_API_KEY_ID not found in environment!")
+        return
+
+    client = KalshiClient(
+        key_id=key_id,
+        private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH"),
+        environment=os.getenv("KALSHI_ENVIRONMENT", "demo"),
+    )
 
     scanner = Scanner(client)
 

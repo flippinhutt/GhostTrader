@@ -1,110 +1,73 @@
-import asyncio
 import logging
 import os
-from typing import List, Dict, Union
-from src.client import PolymarketClient
+from typing import List, Dict
 from src.kalshi_client import KalshiClient
 
 logger = logging.getLogger(__name__)
 
 
 class Scanner:
-    """Scans prediction markets for pricing inefficiencies (Arbitrage).
+    """Scans Kalshi prediction markets for pricing inefficiencies (Arbitrage)."""
 
-    Supports both Polymarket (EIP-712) and Kalshi (US Regulated).
-    """
-
-    def __init__(self, client: Union[PolymarketClient, KalshiClient]):
-        """Initializes the Scanner with a market client.
+    def __init__(self, client: KalshiClient):
+        """Initializes the Scanner with a Kalshi client.
 
         Args:
-            client (Union[PolymarketClient, KalshiClient]): The client used for API communication.
+            client (KalshiClient): The client used for API communication.
         """
         self.client = client
-        self.is_kalshi = isinstance(client, KalshiClient)
 
     async def scan_for_inefficiencies(self) -> List[Dict]:
         """Scans active markets for arbitrage opportunities.
 
-        The number of markets scanned is controlled by the `MARKET_SCAN_LIMIT`
-        environment variable.
+        Fetches a larger pool, filters to liquid markets (volume > 0),
+        then sorts by volume descending so the most active markets are inspected first.
 
         Returns:
             list[dict]: A list of dictionary objects representing discovered inefficiencies.
         """
         inefficiencies = []
         scan_limit = int(os.getenv("MARKET_SCAN_LIMIT", "100"))
+        # Fetch 3x the limit to ensure we get enough liquid markets after filtering
+        fetch_limit = min(scan_limit * 3, 1000)
         try:
-            if self.is_kalshi:
-                markets = self.client.get_markets(limit=scan_limit)
-            else:
-                markets = await self.client.get_markets(limit=scan_limit)
+            all_markets = self.client.get_markets(limit=fetch_limit)
 
-            for market in markets:
-                if self.is_kalshi:
-                    # In Kalshi v2, the market object structure differs
-                    inefficiency = await self._analyze_kalshi_market(market)
-                else:
-                    tokens = market.get("clob_token_ids")
-                    if not tokens or len(tokens) != 2:
-                        continue
-                    inefficiency = await self._analyze_poly_market(market, tokens)
+            # Filter to markets with active volume — these have live bids
+            liquid = [m for m in all_markets if m.volume and float(str(m.volume).split("#")[0].strip()) > 0]
 
+            # Sort by volume descending (most liquid first)
+            try:
+                liquid.sort(key=lambda m: float(str(m.volume).split("#")[0].strip()), reverse=True)
+            except Exception:
+                pass  # If sort fails, use the natural order
+
+            markets = liquid[:scan_limit]
+            logger.info(
+                f"Fetched {len(all_markets)} markets, {len(liquid)} liquid, scanning top {len(markets)}."
+            )
+
+            for i, market in enumerate(markets):
+                if i > 0 and i % 10 == 0:
+                    logger.info(f"Progress: Scanned {i}/{len(markets)} markets...")
+
+                inefficiency = await self._analyze_kalshi_market(market)
                 if inefficiency:
                     inefficiencies.append(inefficiency)
+
+            logger.info(f"Scan complete. Found {len(inefficiencies)} opportunities.")
 
         except Exception as e:
             logger.error(f"Error during scan: {e}")
 
         return inefficiencies
 
-    async def _analyze_poly_market(self, market: Dict, tokens: List[str]) -> Union[Dict, None]:
-        """Analyze a Polymarket for pricing inefficiencies (Total Price < $1.00).
+    async def _analyze_kalshi_market(self, market) -> Dict | None:
+        """Analyze a Kalshi market for pricing inefficiencies (Arbitrage).
 
-        Args:
-            market (dict): The market metadata from the Polymarket API.
-            tokens (list): List of token IDs (YES/NO) for the market.
-
-        Returns:
-            Optional[dict]: Inefficiency data if an arbitrage opportunity is found, 
-                else None.
-        """
-        tasks = [self.client.get_order_book(tid) for tid in tokens]
-        books = await asyncio.gather(*tasks)
-
-        if not all(books):
-            return None
-
-        try:
-            best_asks = []
-            for book in books:
-                asks = book.get("asks", [])
-                if not asks:
-                    return None
-                best_asks.append(float(asks[0]["price"]))
-
-            total_price = sum(best_asks)
-            min_profit_threshold = float(os.getenv("MIN_PROFIT_USD", "0.01"))
-
-            if total_price <= (1.0 - min_profit_threshold):
-                logger.warning(
-                    f"INERTIA (Poly): Profitable market found: {market['question']} | Total: ${total_price:.4f}"
-                )
-                return {
-                    "source": "polymarket",
-                    "market_id": market["id"],
-                    "question": market["question"],
-                    "total_price": total_price,
-                    "tokens": tokens,
-                    "best_asks": best_asks,
-                }
-        except (ValueError, KeyError, IndexError):
-            pass
-
-        return None
-
-    async def _analyze_kalshi_market(self, market) -> Union[Dict, None]:
-        """Analyze a Kalshi market for pricing inefficiencies (Total Price < $1.00).
+        Arbitrage occurs when the sum of the best Bids across both sides is > 100¢.
+        For example: YES best bid = 60¢, NO best bid = 55¢. Total Bids = 115¢.
+        Implied YES Ask = 45¢, Implied NO Ask = 40¢. Total Cost = 85¢ (Profit = 15¢).
 
         Args:
             market: The Kalshi market object.
@@ -121,26 +84,35 @@ class Scanner:
 
         try:
             # Kalshi prices are 1-99 (cents)
-            yes_ask = book.yes[0].price if book.yes else None
-            no_ask = book.no[0].price if book.no else None
+            # BEST BID is the last element ([-1]) in the list
+            yes_bid = book.yes[-1].price if book.yes else None
+            no_bid = book.no[-1].price if book.no else None
 
-            if not yes_ask or not no_ask:
+            if not yes_bid or not no_bid:
                 return None
 
-            # Convert to 0-1.0 scale
-            total_price = (yes_ask + no_ask) / 100.0
-            min_profit_threshold = float(os.getenv("MIN_PROFIT_USD", "0.01"))
+            # Implied asks (cost to buy)
+            implied_yes_ask = 100 - no_bid
+            implied_no_ask = 100 - yes_bid
+            total_cost_cents = implied_yes_ask + implied_no_ask
 
-            if total_price <= (1.0 - min_profit_threshold):
+            # Price logging for diagnostics
+            if total_cost_cents < 110: # Log if it's somewhat close to an arb
+                logger.info(f"Inspecting {ticker}: Bids(Y={yes_bid}c, N={no_bid}c) | Implied Costs(Y={implied_yes_ask}c, N={implied_no_ask}c) | Total Cost={total_cost_cents}c")
+
+            min_profit_threshold = float(os.getenv("MIN_PROFIT_USD", "0.01"))
+            profit_per_share = (100 - total_cost_cents) / 100.0
+
+            if total_cost_cents <= (100 - (min_profit_threshold * 100)):
                 logger.warning(
-                    f"INERTIA (Kalshi): Profitable market found: {ticker} | Total: ${total_price:.4f}"
+                    f"INERTIA (Kalshi): Profitable market found: {ticker} | Total Cost: {total_cost_cents}c | Profit: ${profit_per_share:.4f}/share"
                 )
                 return {
                     "source": "kalshi",
                     "ticker": ticker,
                     "question": market.title,
-                    "total_price": total_price,
-                    "best_asks": [yes_ask, no_ask],
+                    "total_price": total_cost_cents / 100.0, # Total unit cost
+                    "best_asks": [implied_yes_ask, implied_no_ask],
                 }
         except (AttributeError, IndexError):
             pass

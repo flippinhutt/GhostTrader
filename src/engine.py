@@ -1,8 +1,6 @@
 import logging
 import os
-from typing import Dict, Union
-from py_clob_client.clob_types import OrderArgs
-from src.client import PolymarketClient
+from typing import Dict
 from src.kalshi_client import KalshiClient
 
 logger = logging.getLogger(__name__)
@@ -15,20 +13,18 @@ class Engine:
     guards, and executing orders in either Dry-Run or Live mode.
     """
 
-    def __init__(
-        self, client: Union[PolymarketClient, KalshiClient], balance: float = 1400.0
-    ):
+    def __init__(self, client: KalshiClient, balance: float = 1400.0):
         """Initializes the Engine with a client and starting balance.
 
         Args:
-            client (Union[PolymarketClient, KalshiClient]): The authenticated client for trade execution.
+            client (KalshiClient): The authenticated client for trade execution.
             balance (float): The starting virtual balance for Dry-Run mode. Defaults to 1400.0.
         """
         self.client = client
         self.balance = balance
         self.trades_executed = 0
         self.total_profit = 0.0
-        self.is_kalshi = isinstance(client, KalshiClient)
+        self.is_kalshi = True
 
         # Safety Guards from Environment
         self.live_mode = os.getenv("LIVE_MODE", "false").lower() == "true"
@@ -47,17 +43,25 @@ class Engine:
         potential_profit_pct = (1.0 / total_price) - 1.0
         trade_amount = min(self.balance * 0.10, self.max_trade_usd)
 
+        logger.info(
+            f"Checking trade: Amount=${trade_amount:.2f} | Balance=${self.balance:.2f} | Potential Profit={potential_profit_pct:.2%}"
+        )
+
         if trade_amount <= 0:
-            logger.error("Trade amount is zero or negative. Skipping.")
+            logger.warning(
+                f"Trade amount is zero (Balance: ${self.balance:.2f}). Skipping."
+            )
             return
 
         # 2. Execution logic
-        if self.is_kalshi:
-            if self.live_mode:
-                await self._execute_kalshi_live_trade(signal, trade_amount)
-            else:
-                self._execute_dry_run(signal, trade_amount, potential_profit_pct)
-    def _execute_dry_run(self, signal: Dict, trade_amount: float, profit_pct: float) -> None:
+        if self.live_mode:
+            await self._execute_kalshi_live_trade(signal, trade_amount)
+        else:
+            self._execute_dry_run(signal, trade_amount, potential_profit_pct)
+
+    def _execute_dry_run(
+        self, signal: Dict, trade_amount: float, profit_pct: float
+    ) -> None:
         """Simulate a trade execution for tracking in non-live mode.
 
         Args:
@@ -70,44 +74,11 @@ class Engine:
         self.total_profit += profit
         self.trades_executed += 1
 
-        source = signal.get("source", "unknown")
-        logger.info(f"--- [DRY-RUN] ({source.upper()}) TRADE EXECUTED ---")
+        logger.info("--- [DRY-RUN] (KALSHI) TRADE EXECUTED ---")
         logger.info(f"Market: {signal['question']}")
         logger.info(f"Total Price: ${signal['total_price']:.4f}")
         logger.info(f"Profit: ${profit:.2f}")
         logger.info(f"New Balance: ${self.balance:.2f}")
-
-    async def _execute_poly_live_trade(self, signal: Dict, trade_amount: float) -> None:
-        """Execute simultaneous limit orders on two Polymarket tokens for arbitrage.
-
-        Args:
-            signal (dict): Market data including token_ids and current best asks.
-            trade_amount (float): Total USD budget for this specific trade across both sides.
-        """
-        logger.warning(
-            f"!!! [LIVE] (Poly) INITIATING ARBITRAGE for: {signal['question']} !!!"
-        )
-
-        tokens = signal.get("tokens")  # [YES_TOKEN, NO_TOKEN]
-        prices = signal.get("best_asks")  # [YES_PRICE, NO_PRICE]
-
-        try:
-            total_unit_price = sum(prices)
-            share_count = trade_amount / total_unit_price
-
-            for i, token_id in enumerate(tokens):
-                order_args = OrderArgs(
-                    price=prices[i],
-                    size=round(share_count, 2),
-                    side="BUY",
-                    token_id=token_id,
-                )
-                await self.client.post_order(order_args)
-
-            self.trades_executed += 1
-            logger.warning("!!! [LIVE] (Poly) ARBITRAGE ORDERS PLACED SUCCESSFULLY !!!")
-        except Exception as e:
-            logger.error(f"Poly live trade failure: {e}")
 
     async def _execute_kalshi_live_trade(self, signal: Dict, trade_amount: float) -> None:
         """Execute simultaneous YES and NO limit orders on Kalshi for arbitrage.
@@ -121,21 +92,34 @@ class Engine:
         )
 
         ticker = signal.get("ticker")
-        prices = signal.get("best_asks")  # [YES_PRICE_CENTS, NO_PRICE_CENTS]
+        prices = signal.get("best_asks")  # [IMPLIED_YES_ASK, IMPLIED_NO_ASK]
 
         try:
             # On Kalshi, buying 1 contract of YES and 1 contract of NO usually locks in $1.
             total_unit_cost_cents = sum(prices)
             contract_count = int((trade_amount * 100) / total_unit_cost_cents)
 
+            logger.info(
+                f"Calculating contracts: Budget=${trade_amount:.2f} | Implied Total Cost={total_unit_cost_cents}c | Contracts={contract_count}"
+            )
+
             if contract_count < 1:
+                logger.warning(
+                    f"Contract count is < 1 for ticker {ticker}. Budget too low or price too high."
+                )
                 return
 
             # Place YES order
+            logger.info(
+                f"Placing YES order: ticker={ticker}, count={contract_count}, price={prices[0]}c (Hitting Implied Ask)"
+            )
             self.client.post_order(
                 ticker, side="yes", action="buy", count=contract_count, price=prices[0]
             )
             # Place NO order
+            logger.info(
+                f"Placing NO order: ticker={ticker}, count={contract_count}, price={prices[1]}c (Hitting Implied Ask)"
+            )
             self.client.post_order(
                 ticker, side="no", action="buy", count=contract_count, price=prices[1]
             )
@@ -147,3 +131,4 @@ class Engine:
 
         except Exception as e:
             logger.error(f"Kalshi live trade failure: {e}")
+            raise
